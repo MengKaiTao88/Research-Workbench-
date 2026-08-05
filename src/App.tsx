@@ -49,6 +49,29 @@ import {
 
 type ViewId = 'home' | 'projects' | 'library' | 'settings';
 type FilterId = 'all' | RecordType;
+type WorkspacePreferences = {
+  darkMode: boolean;
+  compactTasks: boolean;
+};
+
+const preferencesStorageKey = 'research-workbench.codex-ui.preferences.v1';
+const defaultPreferences: WorkspacePreferences = { darkMode: true, compactTasks: false };
+
+function loadPreferences(): WorkspacePreferences {
+  if (typeof window === 'undefined') return defaultPreferences;
+
+  try {
+    const raw = window.localStorage.getItem(preferencesStorageKey);
+    if (!raw) return defaultPreferences;
+    const parsed = JSON.parse(raw) as Partial<WorkspacePreferences>;
+    return {
+      darkMode: parsed.darkMode !== false,
+      compactTasks: parsed.compactTasks === true,
+    };
+  } catch {
+    return defaultPreferences;
+  }
+}
 
 const navigation: Array<{ id: Exclude<ViewId, 'settings'>; label: string; icon: LucideIcon }> = [
   { id: 'home', label: '任务', icon: MessageSquare },
@@ -142,10 +165,15 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [preferences, setPreferences] = useState<WorkspacePreferences>(() => loadPreferences());
   const [toast, setToast] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => saveRecords(records), [records]);
+
+  useEffect(() => {
+    window.localStorage.setItem(preferencesStorageKey, JSON.stringify(preferences));
+  }, [preferences]);
 
   useEffect(() => {
     if (selectedId && !records.some((record) => record.id === selectedId)) {
@@ -259,10 +287,28 @@ function App() {
     setContextOpen(false);
   }
 
+  function togglePreference(key: keyof WorkspacePreferences) {
+    setPreferences((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function exportRecords() {
+    const payload = JSON.stringify({ exportedAt: new Date().toISOString(), records }, null, 2);
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'research-workbench-backup.json';
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    showToast('已导出本地任务数据');
+  }
+
   const currentWorkspaceLabel = activeView === 'projects' ? '项目' : activeView === 'library' ? '资料库' : activeView === 'settings' ? '设置' : '任务';
 
   return (
-    <div className={`codex-app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${contextOpen ? 'context-open' : ''}`}>
+    <div className={`codex-app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${contextOpen ? 'context-open' : ''} ${preferences.darkMode ? '' : 'light-theme'} ${preferences.compactTasks ? 'compact-tasks' : ''}`}>
       <WorkspaceSidebar
         activeFilter={activeFilter}
         activeView={activeView}
@@ -307,7 +353,7 @@ function App() {
 
         <div className="main-scroll">
           {activeView === 'settings' ? (
-            <SettingsView />
+            <SettingsView compactTasks={preferences.compactTasks} darkMode={preferences.darkMode} onExport={exportRecords} onToggleCompactTasks={() => togglePreference('compactTasks')} onToggleDarkMode={() => togglePreference('darkMode')} />
           ) : activeView === 'home' ? (
             <TaskThread
               composerRef={composerRef}
@@ -620,12 +666,12 @@ function ContextPanel({ onArchive, onDelete, onStatusChange, onToggle, record }:
   );
 }
 
-function SettingsView() {
+function SettingsView({ compactTasks, darkMode, onExport, onToggleCompactTasks, onToggleDarkMode }: { compactTasks: boolean; darkMode: boolean; onExport: () => void; onToggleCompactTasks: () => void; onToggleDarkMode: () => void }) {
   return (
     <div className="settings-view">
       <div className="browser-heading"><div className="thread-kicker"><Settings size={13} /> WORKSPACE SETTINGS</div><h1>设置</h1><p>调整本地研究工作区的外观和数据行为。</p></div>
-      <div className="settings-card"><div className="settings-card-heading"><div><h2>外观</h2><p>当前界面使用接近 Codex 的深色任务布局。</p></div><div className="theme-preview"><span /><span /><span /></div></div><SettingRow label="深色模式" description="降低长时间研究时的视觉干扰" control={<span className="toggle on"><span /></span>} /><SettingRow label="紧凑任务列表" description="让左侧同时显示更多最近任务" control={<span className="toggle"><span /></span>} /></div>
-      <div className="settings-card"><div className="settings-card-heading"><div><h2>数据</h2><p>所有记录默认保存在当前 Windows 用户的本地存储中。</p></div><ShieldCheck size={20} className="settings-muted-icon" /></div><SettingRow label="自动保存" description="每次修改后自动写入本地存储" control={<span className="setting-chip"><Check size={13} /> 已启用</span>} /><SettingRow label="导入 / 导出" description="在数据管理中备份或恢复 JSON 数据" control={<button className="small-action" type="button"><Upload size={13} /> 管理</button>} /></div>
+      <div className="settings-card"><div className="settings-card-heading"><div><h2>外观</h2><p>当前界面使用接近 Codex 的任务布局。</p></div><div className="theme-preview"><span /><span /><span /></div></div><SettingRow label="深色模式" description="降低长时间研究时的视觉干扰" control={<button className={`toggle ${darkMode ? 'on' : ''}`} type="button" role="switch" aria-checked={darkMode} aria-label="深色模式" onClick={onToggleDarkMode}><span /></button>} /><SettingRow label="紧凑任务列表" description="让左侧同时显示更多最近任务" control={<button className={`toggle ${compactTasks ? 'on' : ''}`} type="button" role="switch" aria-checked={compactTasks} aria-label="紧凑任务列表" onClick={onToggleCompactTasks}><span /></button>} /></div>
+      <div className="settings-card"><div className="settings-card-heading"><div><h2>数据</h2><p>所有记录默认保存在当前 Windows 用户的本地存储中。</p></div><ShieldCheck size={20} className="settings-muted-icon" /></div><SettingRow label="自动保存" description="每次修改后自动写入本地存储" control={<span className="setting-chip"><Check size={13} /> 已启用</span>} /><SettingRow label="导入 / 导出" description="下载一份当前任务和研究上下文的 JSON 备份" control={<button className="small-action" type="button" onClick={onExport}><Upload size={13} /> 导出</button>} /></div>
     </div>
   );
 }
